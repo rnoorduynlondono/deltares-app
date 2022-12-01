@@ -1,1 +1,9 @@
+cloudant
+ibm_db
+ibm_db_sa
+matplotlib
+pandas
+plotly
+pydeck
+sqlalchemy
 streamlit

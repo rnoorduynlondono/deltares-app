@@ -1,4 +1,4 @@
-FROM python:3.10-slim
+FROM rnlondono/python-db2:latest
 EXPOSE 8501
 
 WORKDIR /app
