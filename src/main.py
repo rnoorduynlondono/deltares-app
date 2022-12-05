@@ -1,6 +1,7 @@
+import os
 import matplotlib.pyplot as plt
 
-from datetime import datetime, timedelta, date
+from datetime import timedelta, date
 
 import streamlit as st
 import pandas as pd
@@ -10,7 +11,6 @@ import pydeck as pdk
 from connect import get_db2_engine, get_cloudant_client
 
 st.header("Deltares Nitrate APP")
-
 
 @st.cache(allow_output_mutation=True)
 def get_db2_connection():
@@ -110,14 +110,30 @@ def get_parcel_data(parcel_id):
     return head
 
 
+@st.cache
+def get_locations():
+    connection = get_db2_connection()
 
+    return pd.read_sql(
+        """
+        SELECT
+            CAST(LAT as DOUBLE) as lat,
+            CAST(LON as DOUBLE) as lon,
+            NORM_N
+        FROM locations
+        WHERE LAT is not null and LON is not null
+        """,
+        con=connection
+    ).dropna()
+
+
+
+# -----------SIDE BAR------------
 user_counts = get_user_counts()
 min_meas, max_meas = user_counts.min(), user_counts.max()
 
-# -----------SIDE BAR------------
-
 # first let the user choose the minimum amount of measurmeents per user
-number  = st.sidebar.slider( 'minimum measurements', int(min_meas), int(max_meas))
+number = st.sidebar.slider( 'minimum measurements', int(min_meas), int(max_meas))
 
 # filter by the number
 user_counts_filtered = user_counts.loc[user_counts >= number]
@@ -126,18 +142,13 @@ userid = st.sidebar.selectbox("userid", user_counts_filtered.index)
 user_data = get_user_data(userid)
 user_meas = get_user_measurements(userid)
 
-min_time = user_meas['timestamp'].min()
-st.write(min_time)
-st.write(min_time - timedelta(days=30))
+min_time = user_meas['timestamp'].min() - timedelta(days=100)
 
 meetpunt, *_ = user_meas['meetpunt_code_ihw'].unique()
 mnlso_meas = get_mnlso_measurements(meetpunt, min_time=min_time)
 
-st.write(user_data)
-# st.write(type(user_data['first_nitrate_meas_date']))
-# st.table(user_meas)
-st.table(user_meas.dtypes)
-st.table(mnlso_meas.dtypes)
+st.table(user_meas.head())
+st.table(mnlso_meas.head())
 
 fig, ax  = plt.subplots()
 
@@ -145,34 +156,58 @@ ax.plot(user_meas['timestamp'], user_meas['value'])
 ax.plot(mnlso_meas['dtime'], mnlso_meas['val'], alpha=0.5, linewidth=2)
 st.pyplot(fig)
 
-st.table(mnlso_meas)
 parcel_data = get_parcel_data(user_data['parcel_id'])
 
-
-coordinates, *_ = parcel_data['geometry']['coordinates']
-
-
 INITIAL_VIEW_STATE = pdk.ViewState(
-    longitude=np.mean([lon for lon, _ in coordinates]),
-    latitude=np.mean([lat for _, lat in coordinates]),
-    zoom=16
+    longitude=user_meas.longitude.mean(),
+    latitude=user_meas.latitude.mean(),
+    zoom=15
 )
 
-st.pydeck_chart(
-    pdk.Deck(
+parcel_layer = pdk.Layer(
+    "GeoJsonLayer",
+    parcel_data,
+    opacity=0.7,
+    filled=True,
+    get_fill_color=[255, 255, 255],
+)
+
+
+
+meas_data = pdk.Layer(
+    "ScatterplotLayer",
+    user_meas.assign(timestamp_str=user_meas.timestamp.dt.strftime("%Y-%m-%d")),
+    opacity=0.3,
+    get_position=['longitude', 'latitude'],
+    get_fill_color=[255, 0, 0],
+    get_radius=5,
+    pickable=True,
+)
+
+
+loc_layer = pdk.Layer(
+    "ScatterplotLayer",
+    get_locations(),
+    opacity=0.7,
+    get_position=['lon', 'lat'],
+    get_radius=1000,
+    get_fill_color=[0, 255, 0],
+    pickable=True,
+)
+
+deck = pdk.Deck(
         layers=[
-            pdk.Layer(
-                "GeoJsonLayer",
-                parcel_data,
-                opacity=0.7,
-                filled=True,
-                wireframe=True,
-                get_fill_color=[255, 255, 255],
-            )
+            parcel_layer,
+            meas_data,
+            loc_layer
         ],
-        initial_view_state=INITIAL_VIEW_STATE
+        initial_view_state=INITIAL_VIEW_STATE,
+        api_keys={'mapbox': os.environ['MAPBOX_TOKEN']},
+        tooltip={
+            "html": "<b>Nitrate Measurement</b>: {value} <br> Measurement Date: {timestamp_str}"
+        },
+        map_style=pdk.map_styles.LIGHT,
     )
-)
 
-
-
+deck.to_html()
+st.pydeck_chart(deck)
