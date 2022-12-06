@@ -358,10 +358,4 @@ with col2:
         with st.expander(f):
             for m in measures:
                 if m in measure_map:
-                    st.write(measure_map[v])
-
-
-
-
-
-
+                    st.write(measure_map[m])
