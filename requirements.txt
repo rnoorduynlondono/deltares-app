@@ -2,8 +2,10 @@ cloudant
 ibm_db
 ibm_db_sa
 matplotlib
+mpld3
 pandas
 plotly
 pydeck
 sqlalchemy
 streamlit
+scipy

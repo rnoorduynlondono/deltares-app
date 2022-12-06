@@ -4,6 +4,8 @@ EXPOSE 8501
 WORKDIR /app
 
 COPY ./requirements.txt ./requirements.txt
+COPY ./measuremap.csv ./measuremap.csv
+
 RUN python -m pip install -r requirements.txt
 
 COPY ./src src
