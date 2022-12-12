@@ -1,4 +1,5 @@
 from datetime import date
+from functools import partial
 import streamlit as st
 import pandas as pd
 from utils import add_color, map_category
@@ -30,30 +31,89 @@ def load_measuremaps():
 
 
 @st.cache
-def get_user_counts():
+def get_usage_dates(lookback_days=30, min_meas=3):
+    engine = get_db2_connection()
+
+    user_meas = (
+        pd.read_sql(
+            f"""
+            SELECT
+                m.parcel_id as userid,
+                n."timestamp"
+            FROM NITRATEAPP as n
+            INNER JOIN NITRATE_ID_MAPPING as m
+            ON n.id = m.nitrate_id
+            WHERE m.parcel_id IN (
+                SELECT t.parcel_id
+                FROM NITRATE_ID_MAPPING as t
+                GROUP BY t.parcel_id
+                HAVING COUNT(*) > {min_meas}
+            )
+            """,
+            con=engine,
+        )
+        .set_index("timestamp")
+        .squeeze()
+    )
+
+    def number_active_users(x):
+        return len(x.unique())
+
+    return user_meas.resample(f"{lookback_days}D").apply(number_active_users)
+
+
+@st.cache
+def get_user_ids(min_date, max_date, min_meas):
     """Get user counts from the database"""
     eng = get_db2_connection()
+
     user_counts = (
         pd.read_sql(
-            """
+            f"""
             SELECT
-                parcel_id as userid,
-                total_nitrate_meas as cnt
-            FROM USER_DATA
-            ORDER BY cnt
+                m.parcel_id as userid,
+                count(*) as counts
+            FROM NITRATEAPP as n
+            INNER JOIN NITRATE_ID_MAPPING as m
+            ON n.id = m.nitrate_id
+            WHERE
+                n."timestamp" >= '{min_date:%Y-%m-%d}' AND
+                n."timestamp" <= '{max_date:%Y-%m-%d}'
+            GROUP BY m.parcel_id
+            HAVING COUNT(*) > {min_meas}
             """,
             con=eng,
         )
         .set_index("userid")
-        .squeeze()
         .astype(int)
     )
 
     return user_counts
 
 
+@st.cache
+def get_weather_data(user_id, min_date, max_date):
+    eng = get_db2_connection()
+
+    return pd.read_sql(
+        f"""
+            SELECT
+                layer_id,
+                layer_name,
+                meas_time as timestamp,
+                meas_value as value
+            FROM WEATHERDATA
+            WHERE
+                userid = {user_id} AND
+                meas_time >= '{min_date:%Y-%m-%d}' AND
+                meas_time <= '{max_date:%Y-%m-%d}'
+            """,
+        con=eng,
+    ).rename(columns=str.lower)
+
+
 @st.cache(allow_output_mutation=True)
-def get_user_measurements(user_id):
+def get_user_measurements(user_id, min_date, max_date):
     eng = get_db2_connection()
 
     return (
@@ -70,7 +130,10 @@ def get_user_measurements(user_id):
             FROM NITRATEAPP_NL_WITH_LOC_ID as n
             INNER JOIN NITRATE_ID_MAPPING as m
             ON n.id = m.nitrate_id
-            WHERE m.parcel_id = {user_id}
+            WHERE
+                m.parcel_id = {user_id} AND
+                n."timestamp" >= '{min_date:%Y-%m-%d}' AND
+                n."timestamp" <= '{max_date:%Y-%m-%d}'
             ORDER BY n."timestamp"
             """,
             con=eng,
@@ -184,4 +247,24 @@ def get_locations(lat, lon, thres=0.3):
         .assign(timestamp=lambda f: pd.to_datetime(f.timestamp))
         .assign(timestamp_str=lambda f: f.timestamp.dt.strftime("%Y-%m-%d"))
         .pipe(add_color)
+    )
+
+
+@st.cache
+def get_weather_layers():
+    connection = get_db2_connection()
+
+    return (
+        pd.read_sql(
+            """
+            SELECT DISTINCT
+                layer_id,
+                layer_name
+            FROM weatherdata
+            """,
+            con=connection,
+        )
+        .set_index("layer_name")
+        .squeeze()
+        .to_dict()
     )

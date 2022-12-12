@@ -1,6 +1,7 @@
 cloudant
 ibm_db
 ibm_db_sa
+ibmpairs
 matplotlib
 mpld3
 pandas
@@ -9,3 +10,4 @@ pydeck
 sqlalchemy
 streamlit
 scipy
+requests
